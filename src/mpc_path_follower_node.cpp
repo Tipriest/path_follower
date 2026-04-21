@@ -29,6 +29,7 @@ public:
     pnh.param("max_vy", max_vy_, 1.0);
     pnh.param("max_w", max_w_, 1.0);
     pnh.param("invert_w", invert_w_, false);
+    pnh.param("nonlinear_iters", nonlinear_iters_, 3);
     pnh.param("allow_reverse", allow_reverse_, false);
     pnh.param("nearest_search_window", nearest_search_window_, 50);
 
@@ -104,36 +105,76 @@ private:
     UnwrapYaw(&yaw_ref);
 
     const int N = horizon_steps_;
-    Eigen::MatrixXd A(2 * N, 2 * N);
-    Eigen::VectorXd b(2 * N);
-    A.setZero();
-    b.setZero();
+    std::vector<double> yaw_seq(static_cast<size_t>(N + 1), yaw0);
+    Eigen::VectorXd u(2 * N);
+    Eigen::VectorXd uw(N);
+    bool solved = false;
 
-    for (int k = 0; k < N; ++k) {
-      const double dx = refs[k + 1].x - x0;
-      const double dy = refs[k + 1].y - y0;
-      b(2 * k) = dx;
-      b(2 * k + 1) = dy;
+    for (int iter = 0; iter < std::max(1, nonlinear_iters_); ++iter) {
+      Eigen::MatrixXd A(2 * N, 2 * N);
+      Eigen::VectorXd b(2 * N);
+      A.setZero();
+      b.setZero();
 
-      for (int i = 0; i <= k; ++i) {
-        const double cy = std::cos(yaw_ref[i]);
-        const double sy = std::sin(yaw_ref[i]);
-        A(2 * k, i) = dt_ * cy;
-        A(2 * k, i + N) = -dt_ * sy;
-        A(2 * k + 1, i) = dt_ * sy;
-        A(2 * k + 1, i + N) = dt_ * cy;
+      for (int k = 0; k < N; ++k) {
+        const double dx = refs[k + 1].x - x0;
+        const double dy = refs[k + 1].y - y0;
+        b(2 * k) = dx;
+        b(2 * k + 1) = dy;
+
+        for (int i = 0; i <= k; ++i) {
+          const double cy = std::cos(yaw_seq[static_cast<size_t>(i)]);
+          const double sy = std::sin(yaw_seq[static_cast<size_t>(i)]);
+          A(2 * k, i) = dt_ * cy;
+          A(2 * k, i + N) = -dt_ * sy;
+          A(2 * k + 1, i) = dt_ * sy;
+          A(2 * k + 1, i + N) = dt_ * cy;
+        }
       }
+
+      Eigen::MatrixXd reg = Eigen::MatrixXd::Zero(2 * N, 2 * N);
+      reg.block(0, 0, N, N) = lambda_vx_ * Eigen::MatrixXd::Identity(N, N);
+      reg.block(N, N, N, N) = lambda_vy_ * Eigen::MatrixXd::Identity(N, N);
+      Eigen::MatrixXd H = A.transpose() * A + reg;
+      Eigen::VectorXd g = A.transpose() * b;
+
+      u = H.ldlt().solve(g);
+      if (u.size() != 2 * N) {
+        solved = false;
+        break;
+      }
+
+      Eigen::MatrixXd Ayaw(N, N);
+      Eigen::VectorXd byaw(N);
+      Ayaw.setZero();
+      byaw.setZero();
+      for (int k = 0; k < N; ++k) {
+        const double dyaw =
+            NormalizeAngle(yaw_ref[k + 1] - yaw_seq[static_cast<size_t>(k)]);
+        byaw(k) = dyaw;
+        for (int i = 0; i <= k; ++i) {
+          Ayaw(k, i) = dt_;
+        }
+      }
+      Eigen::MatrixXd Hyaw =
+          Ayaw.transpose() * Ayaw + lambda_ * Eigen::MatrixXd::Identity(N, N);
+      Eigen::VectorXd gyaw = Ayaw.transpose() * byaw;
+      uw = Hyaw.ldlt().solve(gyaw);
+      if (uw.size() != N) {
+        solved = false;
+        break;
+      }
+
+      yaw_seq[0] = yaw0;
+      for (int k = 0; k < N; ++k) {
+        yaw_seq[static_cast<size_t>(k + 1)] =
+            NormalizeAngle(yaw_seq[static_cast<size_t>(k)] + dt_ * uw(k));
+      }
+
+      solved = true;
     }
 
-    Eigen::MatrixXd reg = Eigen::MatrixXd::Zero(2 * N, 2 * N);
-    reg.block(0, 0, N, N) = lambda_vx_ * Eigen::MatrixXd::Identity(N, N);
-    reg.block(N, N, N, N) = lambda_vy_ * Eigen::MatrixXd::Identity(N, N);
-    Eigen::MatrixXd H = A.transpose() * A + reg;
-    Eigen::VectorXd g = A.transpose() * b;
-
-    Eigen::VectorXd u = H.ldlt().solve(g);
-
-    if (u.size() != 2 * N) {
+    if (!solved || u.size() != 2 * N || uw.size() != N) {
       PublishDebug(false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                    0.0, 0.0, 0.0, 0.0);
       return false;
@@ -141,22 +182,6 @@ private:
 
     const double vx = Clamp(u(0), -max_vx_, max_vx_);
     const double vy = Clamp(u(N), -max_vy_, max_vy_);
-
-    Eigen::MatrixXd Ayaw(N, N);
-    Eigen::VectorXd byaw(N);
-    Ayaw.setZero();
-    byaw.setZero();
-    for (int k = 0; k < N; ++k) {
-      const double dyaw = NormalizeAngle(yaw_ref[k + 1] - yaw0);
-      byaw(k) = dyaw;
-      for (int i = 0; i <= k; ++i) {
-        Ayaw(k, i) = dt_;
-      }
-    }
-    Eigen::MatrixXd Hyaw =
-        Ayaw.transpose() * Ayaw + lambda_ * Eigen::MatrixXd::Identity(N, N);
-    Eigen::VectorXd gyaw = Ayaw.transpose() * byaw;
-    Eigen::VectorXd uw = Hyaw.ldlt().solve(gyaw);
 
     double w = (uw.size() > 0) ? Clamp(uw(0), -max_w_, max_w_) : 0.0;
     if (invert_w_) {
@@ -340,6 +365,7 @@ private:
 
   bool allow_reverse_{false};
   int nearest_search_window_{50};
+  int nonlinear_iters_{3};
   size_t last_nearest_index_{0};
 };
 
