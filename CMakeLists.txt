@@ -12,6 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
 	nav_msgs
 	geometry_msgs
 	tf2
+	std_msgs
 )
 
 find_package(Eigen3 REQUIRED)
@@ -106,7 +107,7 @@ find_package(Eigen3 REQUIRED)
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-	CATKIN_DEPENDS roscpp nav_msgs geometry_msgs tf2
+	CATKIN_DEPENDS roscpp nav_msgs geometry_msgs tf2 std_msgs
 )
 
 ###########
@@ -163,6 +164,10 @@ target_link_libraries(mpc_path_follower_node
 #   scripts/my_python_script
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
+catkin_install_python(PROGRAMS
+	scripts/mpc_debug_plotter.py
+	DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html

@@ -2,24 +2,28 @@
   <arg name="path_topic" default="/run_hybrid_astar/searched_path" />
   <arg name="odom_topic" default="/gazebo_odom" />
   <arg name="cmd_vel_topic" default="/cmd_vel" />
+  <arg name="debug_topic" default="/mpc_debug" />
+  <arg name="enable_debug_plotter" default="true" />
+  <arg name="debug_plotter_max_points" default="600" />
 
   <arg name="control_rate" default="10.0" />
   <arg name="dt" default="0.1" />
   <arg name="horizon_steps" default="10" />
   <arg name="lambda" default="0.1" />
   <arg name="lambda_vx" default="0.1" />
-  <arg name="lambda_vy" default="0.5" />
+  <arg name="lambda_vy" default="5.0" />
   <arg name="allow_reverse" default="false" />
   <arg name="nearest_search_window" default="50" />
 
   <arg name="max_vx" default="0.5" />
-  <arg name="max_vy" default="0.2" />
-  <arg name="max_w" default="0.2" />
+  <arg name="max_vy" default="0.1" />
+  <arg name="max_w" default="1.0" />
 
   <node pkg="path_follower" type="mpc_path_follower_node" name="mpc_path_follower" output="screen">
     <param name="path_topic" value="$(arg path_topic)" />
     <param name="odom_topic" value="$(arg odom_topic)" />
     <param name="cmd_vel_topic" value="$(arg cmd_vel_topic)" />
+    <param name="debug_topic" value="$(arg debug_topic)" />
 
     <param name="control_rate" value="$(arg control_rate)" />
     <param name="dt" value="$(arg dt)" />
@@ -36,6 +40,11 @@
   </node>
 
   <node pkg="map_generator" type="map_generator_node" name="map_generator_node" output="screen" />
+
+  <node if="$(arg enable_debug_plotter)" pkg="path_follower" type="mpc_debug_plotter.py" name="mpc_debug_plotter" output="screen">
+    <param name="debug_topic" value="$(arg debug_topic)" />
+    <param name="max_points" value="$(arg debug_plotter_max_points)" />
+  </node>
 
 
   <arg name="fixed_frame" default="world"/>

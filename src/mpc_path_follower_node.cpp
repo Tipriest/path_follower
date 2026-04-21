@@ -7,6 +7,7 @@
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 #include <ros/ros.h>
+#include <std_msgs/Float64MultiArray.h>
 #include <tf2/utils.h>
 
 class MpcPathFollower {
@@ -15,6 +16,7 @@ public:
     pnh.param<std::string>("path_topic", path_topic_, "/searched_path");
     pnh.param<std::string>("odom_topic", odom_topic_, "/gazebo_odom");
     pnh.param<std::string>("cmd_vel_topic", cmd_vel_topic_, "/cmd_vel");
+    pnh.param<std::string>("debug_topic", debug_topic_, "/mpc_debug");
 
     pnh.param("control_rate", control_rate_, 10.0);
     pnh.param("horizon_steps", horizon_steps_, 10);
@@ -26,12 +28,14 @@ public:
     pnh.param("max_vx", max_vx_, 1.0);
     pnh.param("max_vy", max_vy_, 1.0);
     pnh.param("max_w", max_w_, 1.0);
+    pnh.param("invert_w", invert_w_, false);
     pnh.param("allow_reverse", allow_reverse_, false);
     pnh.param("nearest_search_window", nearest_search_window_, 50);
 
     path_sub_ = nh.subscribe(path_topic_, 1, &MpcPathFollower::OnPath, this);
     odom_sub_ = nh.subscribe(odom_topic_, 1, &MpcPathFollower::OnOdom, this);
     cmd_pub_ = nh.advertise<geometry_msgs::Twist>(cmd_vel_topic_, 1);
+    debug_pub_ = nh.advertise<std_msgs::Float64MultiArray>(debug_topic_, 1);
 
     const double timer_dt = (control_rate_ > 0.0) ? (1.0 / control_rate_) : 0.1;
     control_timer_ = nh.createTimer(ros::Duration(timer_dt),
@@ -61,7 +65,8 @@ private:
     }
 
     geometry_msgs::Twist cmd;
-    if (!ComputeMpcCommand(&cmd)) {
+    const bool ok = ComputeMpcCommand(&cmd);
+    if (!ok) {
       cmd.linear.x = 0.0;
       cmd.linear.y = 0.0;
       cmd.angular.z = 0.0;
@@ -72,6 +77,8 @@ private:
 
   bool ComputeMpcCommand(geometry_msgs::Twist *cmd) {
     if (horizon_steps_ < 1 || dt_ <= 0.0) {
+      PublishDebug(false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                   0.0, 0.0, 0.0, 0.0);
       return false;
     }
 
@@ -85,6 +92,8 @@ private:
     BuildReferenceTrajectory(nearest, horizon_steps_, &refs);
 
     if (refs.size() < static_cast<size_t>(horizon_steps_ + 1)) {
+      PublishDebug(false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                   0.0, 0.0, 0.0, 0.0);
       return false;
     }
 
@@ -125,6 +134,8 @@ private:
     Eigen::VectorXd u = H.ldlt().solve(g);
 
     if (u.size() != 2 * N) {
+      PublishDebug(false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                   0.0, 0.0, 0.0, 0.0);
       return false;
     }
 
@@ -147,7 +158,19 @@ private:
     Eigen::VectorXd gyaw = Ayaw.transpose() * byaw;
     Eigen::VectorXd uw = Hyaw.ldlt().solve(gyaw);
 
-    const double w = (uw.size() > 0) ? Clamp(uw(0), -max_w_, max_w_) : 0.0;
+    double w = (uw.size() > 0) ? Clamp(uw(0), -max_w_, max_w_) : 0.0;
+    if (invert_w_) {
+      w = -w;
+    }
+
+    const RefPoint &ref0 = refs.front();
+    const double ex = x0 - ref0.x;
+    const double ey = y0 - ref0.y;
+    const double eyaw = NormalizeAngle(yaw0 - ref0.yaw);
+    const double ref_c = std::cos(ref0.yaw);
+    const double ref_s = std::sin(ref0.yaw);
+    const double along_err = ref_c * ex + ref_s * ey;
+    const double lateral_err = -ref_s * ex + ref_c * ey;
 
     cmd->linear.x = vx;
     cmd->linear.y = vy;
@@ -156,7 +179,42 @@ private:
     cmd->angular.y = 0.0;
     cmd->angular.z = w;
 
+    PublishDebug(true, static_cast<double>(nearest), x0, y0, yaw0, ref0.x,
+                 ref0.y, ref0.yaw, ex, ey, eyaw, along_err, lateral_err, vx, vy,
+                 w);
+
     return true;
+  }
+
+  void PublishDebug(bool ok, double nearest_index, double x, double y,
+                    double yaw, double ref_x, double ref_y, double ref_yaw,
+                    double ex, double ey, double eyaw, double along_err,
+                    double lateral_err, double vx, double vy, double w) {
+    if (!debug_pub_) {
+      return;
+    }
+
+    std_msgs::Float64MultiArray msg;
+    msg.data.reserve(18);
+    msg.data.push_back(ok ? 1.0 : 0.0);
+    msg.data.push_back(ros::Time::now().toSec());
+    msg.data.push_back(nearest_index);
+    msg.data.push_back(x);
+    msg.data.push_back(y);
+    msg.data.push_back(yaw);
+    msg.data.push_back(ref_x);
+    msg.data.push_back(ref_y);
+    msg.data.push_back(ref_yaw);
+    msg.data.push_back(ex);
+    msg.data.push_back(ey);
+    msg.data.push_back(eyaw);
+    msg.data.push_back(along_err);
+    msg.data.push_back(lateral_err);
+    msg.data.push_back(vx);
+    msg.data.push_back(vy);
+    msg.data.push_back(w);
+
+    debug_pub_.publish(msg);
   }
 
   size_t FindNearestIndex(double x, double y, double yaw) {
@@ -255,6 +313,7 @@ private:
   ros::Subscriber path_sub_;
   ros::Subscriber odom_sub_;
   ros::Publisher cmd_pub_;
+  ros::Publisher debug_pub_;
   ros::Timer control_timer_;
 
   std::vector<geometry_msgs::PoseStamped> path_;
@@ -265,6 +324,7 @@ private:
   std::string path_topic_;
   std::string odom_topic_;
   std::string cmd_vel_topic_;
+  std::string debug_topic_;
 
   double control_rate_{10.0};
   int horizon_steps_{10};
@@ -276,6 +336,7 @@ private:
   double max_vx_{1.0};
   double max_vy_{1.0};
   double max_w_{1.0};
+  bool invert_w_{false};
 
   bool allow_reverse_{false};
   int nearest_search_window_{50};
