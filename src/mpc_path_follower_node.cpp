@@ -32,6 +32,8 @@ public:
     pnh.param("nonlinear_iters", nonlinear_iters_, 3);
     pnh.param("allow_reverse", allow_reverse_, false);
     pnh.param("nearest_search_window", nearest_search_window_, 50);
+    pnh.param("ref_step", ref_step_, 0.2);
+    pnh.param("max_lookahead", max_lookahead_, 2.0);
 
     path_sub_ = nh.subscribe(path_topic_, 1, &MpcPathFollower::OnPath, this);
     odom_sub_ = nh.subscribe(odom_topic_, 1, &MpcPathFollower::OnOdom, this);
@@ -53,6 +55,7 @@ private:
   void OnPath(const nav_msgs::Path::ConstPtr &msg) {
     path_ = msg->poses;
     has_path_ = !path_.empty();
+    last_nearest_index_ = 0;
   }
 
   void OnOdom(const nav_msgs::Odometry::ConstPtr &msg) {
@@ -250,7 +253,7 @@ private:
     const double hx = std::cos(yaw);
     const double hy = std::sin(yaw);
 
-    const size_t start = last_nearest_index_;
+    const size_t start = std::min(last_nearest_index_, path_.size() - 1);
     const size_t end = std::min(
         path_.size() - 1, start + static_cast<size_t>(nearest_search_window_));
 
@@ -298,16 +301,65 @@ private:
     refs->clear();
     refs->reserve(static_cast<size_t>(horizon + 1));
 
-    const size_t last_index = path_.empty() ? 0 : path_.size() - 1;
-    for (int k = 0; k <= horizon; ++k) {
-      const size_t idx =
-          std::min(start_index + static_cast<size_t>(k), last_index);
-      const auto &pose = path_[idx].pose;
+    if (path_.empty()) {
+      return;
+    }
+
+    const size_t last_index = path_.size() - 1;
+    size_t seg_idx = std::min(start_index, last_index);
+    double accumulated = 0.0;
+
+    auto poseToRef = [](const geometry_msgs::Pose &pose) {
       RefPoint ref;
       ref.x = pose.position.x;
       ref.y = pose.position.y;
       ref.yaw = tf2::getYaw(pose.orientation);
-      refs->push_back(ref);
+      return ref;
+    };
+
+    refs->push_back(poseToRef(path_[seg_idx].pose));
+
+    const double max_lookahead =
+        (max_lookahead_ > 0.0) ? max_lookahead_ : ref_step_ * horizon;
+
+    for (int k = 1; k <= horizon; ++k) {
+      const double target_dist = ref_step_ * static_cast<double>(k);
+      if (target_dist > max_lookahead) {
+        refs->push_back(poseToRef(path_[seg_idx].pose));
+        continue;
+      }
+      while (seg_idx < last_index) {
+        const auto &pose0 = path_[seg_idx].pose;
+        const auto &pose1 = path_[seg_idx + 1].pose;
+        const double dx = pose1.position.x - pose0.position.x;
+        const double dy = pose1.position.y - pose0.position.y;
+        const double seg_len = std::hypot(dx, dy);
+
+        if (seg_len < 1e-6) {
+          seg_idx++;
+          continue;
+        }
+
+        if (accumulated + seg_len >= target_dist) {
+          const double ratio = (target_dist - accumulated) / seg_len;
+          RefPoint ref;
+          ref.x = pose0.position.x + ratio * dx;
+          ref.y = pose0.position.y + ratio * dy;
+          const double yaw0 = tf2::getYaw(pose0.orientation);
+          const double yaw1 = tf2::getYaw(pose1.orientation);
+          const double dyaw = NormalizeAngle(yaw1 - yaw0);
+          ref.yaw = NormalizeAngle(yaw0 + ratio * dyaw);
+          refs->push_back(ref);
+          break;
+        }
+
+        accumulated += seg_len;
+        seg_idx++;
+      }
+
+      if (seg_idx >= last_index) {
+        refs->push_back(poseToRef(path_[last_index].pose));
+      }
     }
   }
 
@@ -366,6 +418,8 @@ private:
   bool allow_reverse_{false};
   int nearest_search_window_{50};
   int nonlinear_iters_{3};
+  double ref_step_{0.2};
+  double max_lookahead_{2.0};
   size_t last_nearest_index_{0};
 };
 

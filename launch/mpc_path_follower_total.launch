@@ -15,9 +15,11 @@
   <arg name="allow_reverse" default="false" />
   <arg name="nearest_search_window" default="50" />
   <arg name="nonlinear_iters" default="3" />
+  <arg name="ref_step" default="0.05" />
+  <arg name="max_lookahead" default="2.0" />
 
   <arg name="max_vx" default="0.5" />
-  <arg name="max_vy" default="0.1" />
+  <arg name="max_vy" default="0.3" />
   <arg name="max_w" default="1.0" />
 
   <node pkg="path_follower" type="mpc_path_follower_node" name="mpc_path_follower" output="screen">
@@ -35,6 +37,8 @@
     <param name="allow_reverse" value="$(arg allow_reverse)" />
     <param name="nearest_search_window" value="$(arg nearest_search_window)" />
     <param name="nonlinear_iters" value="$(arg nonlinear_iters)" />
+    <param name="ref_step" value="$(arg ref_step)" />
+    <param name="max_lookahead" value="$(arg max_lookahead)" />
 
     <param name="max_vx" value="$(arg max_vx)" />
     <param name="max_vy" value="$(arg max_vy)" />
