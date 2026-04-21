@@ -1,0 +1,29 @@
+<launch>
+  <arg name="path_topic" default="/run_hybrid_astar/searched_path" />
+  <arg name="odom_topic" default="/gazebo_odom" />
+  <arg name="cmd_vel_topic" default="/cmd_vel" />
+
+  <arg name="control_rate" default="10.0" />
+  <arg name="dt" default="0.1" />
+  <arg name="horizon_steps" default="10" />
+  <arg name="lambda" default="0.1" />
+
+  <arg name="max_vx" default="0.5" />
+  <arg name="max_vy" default="0.5" />
+  <arg name="max_w" default="0.2" />
+
+  <node pkg="path_follower" type="mpc_path_follower_node" name="mpc_path_follower" output="screen">
+    <param name="path_topic" value="$(arg path_topic)" />
+    <param name="odom_topic" value="$(arg odom_topic)" />
+    <param name="cmd_vel_topic" value="$(arg cmd_vel_topic)" />
+
+    <param name="control_rate" value="$(arg control_rate)" />
+    <param name="dt" value="$(arg dt)" />
+    <param name="horizon_steps" value="$(arg horizon_steps)" />
+    <param name="lambda" value="$(arg lambda)" />
+
+    <param name="max_vx" value="$(arg max_vx)" />
+    <param name="max_vy" value="$(arg max_vy)" />
+    <param name="max_w" value="$(arg max_w)" />
+  </node>
+</launch>
