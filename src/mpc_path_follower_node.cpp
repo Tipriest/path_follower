@@ -147,7 +147,7 @@ private:
     Ayaw.setZero();
     byaw.setZero();
     for (int k = 0; k < N; ++k) {
-      const double dyaw = yaw_ref[k + 1] - yaw0;
+      const double dyaw = NormalizeAngle(yaw_ref[k + 1] - yaw0);
       byaw(k) = dyaw;
       for (int i = 0; i <= k; ++i) {
         Ayaw(k, i) = dt_;
