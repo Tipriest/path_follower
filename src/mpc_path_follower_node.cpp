@@ -20,10 +20,14 @@ public:
     pnh.param("horizon_steps", horizon_steps_, 10);
     pnh.param("dt", dt_, 0.1);
     pnh.param("lambda", lambda_, 0.1);
+    pnh.param("lambda_vx", lambda_vx_, 0.1);
+    pnh.param("lambda_vy", lambda_vy_, 0.5);
 
     pnh.param("max_vx", max_vx_, 1.0);
     pnh.param("max_vy", max_vy_, 1.0);
     pnh.param("max_w", max_w_, 1.0);
+    pnh.param("allow_reverse", allow_reverse_, false);
+    pnh.param("nearest_search_window", nearest_search_window_, 50);
 
     path_sub_ = nh.subscribe(path_topic_, 1, &MpcPathFollower::OnPath, this);
     odom_sub_ = nh.subscribe(odom_topic_, 1, &MpcPathFollower::OnOdom, this);
@@ -76,7 +80,7 @@ private:
     const double y0 = pose.position.y;
     const double yaw0 = tf2::getYaw(pose.orientation);
 
-    const size_t nearest = FindNearestIndex(x0, y0);
+    const size_t nearest = FindNearestIndex(x0, y0, yaw0);
     std::vector<RefPoint> refs;
     BuildReferenceTrajectory(nearest, horizon_steps_, &refs);
 
@@ -112,7 +116,9 @@ private:
       }
     }
 
-    Eigen::MatrixXd reg = lambda_ * Eigen::MatrixXd::Identity(2 * N, 2 * N);
+    Eigen::MatrixXd reg = Eigen::MatrixXd::Zero(2 * N, 2 * N);
+    reg.block(0, 0, N, N) = lambda_vx_ * Eigen::MatrixXd::Identity(N, N);
+    reg.block(N, N, N, N) = lambda_vy_ * Eigen::MatrixXd::Identity(N, N);
     Eigen::MatrixXd H = A.transpose() * A + reg;
     Eigen::VectorXd g = A.transpose() * b;
 
@@ -153,21 +159,54 @@ private:
     return true;
   }
 
-  size_t FindNearestIndex(double x, double y) const {
-    size_t best_index = 0;
-    double best_dist = std::numeric_limits<double>::infinity();
+  size_t FindNearestIndex(double x, double y, double yaw) {
+    if (path_.empty()) {
+      return 0;
+    }
 
-    for (size_t i = 0; i < path_.size(); ++i) {
+    const double hx = std::cos(yaw);
+    const double hy = std::sin(yaw);
+
+    const size_t start = last_nearest_index_;
+    const size_t end = std::min(
+        path_.size() - 1, start + static_cast<size_t>(nearest_search_window_));
+
+    size_t best_index = start;
+    double best_dist = std::numeric_limits<double>::infinity();
+    bool found_forward = false;
+
+    for (size_t i = start; i <= end; ++i) {
       const auto &p = path_[i].pose.position;
       const double dx = p.x - x;
       const double dy = p.y - y;
+      if (!allow_reverse_) {
+        const double dot = dx * hx + dy * hy;
+        if (dot < 0.0) {
+          continue;
+        }
+      }
       const double dist = dx * dx + dy * dy;
       if (dist < best_dist) {
         best_dist = dist;
         best_index = i;
+        found_forward = true;
       }
     }
 
+    if (!found_forward) {
+      for (size_t i = start; i <= end; ++i) {
+        const auto &p = path_[i].pose.position;
+        const double dx = p.x - x;
+        const double dy = p.y - y;
+        const double dist = dx * dx + dy * dy;
+        if (dist < best_dist) {
+          best_dist = dist;
+          best_index = i;
+        }
+      }
+    }
+
+    last_nearest_index_ = best_index;
     return best_index;
   }
 
@@ -231,10 +270,16 @@ private:
   int horizon_steps_{10};
   double dt_{0.1};
   double lambda_{0.1};
+  double lambda_vx_{0.1};
+  double lambda_vy_{0.5};
 
   double max_vx_{1.0};
   double max_vy_{1.0};
   double max_w_{1.0};
+
+  bool allow_reverse_{false};
+  int nearest_search_window_{50};
+  size_t last_nearest_index_{0};
 };
 
 int main(int argc, char **argv) {

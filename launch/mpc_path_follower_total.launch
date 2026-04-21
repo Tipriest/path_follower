@@ -7,10 +7,14 @@
   <arg name="dt" default="0.1" />
   <arg name="horizon_steps" default="10" />
   <arg name="lambda" default="0.1" />
+  <arg name="lambda_vx" default="0.1" />
+  <arg name="lambda_vy" default="0.5" />
+  <arg name="allow_reverse" default="false" />
+  <arg name="nearest_search_window" default="50" />
 
-  <arg name="max_vx" default="1.0" />
-  <arg name="max_vy" default="1.0" />
-  <arg name="max_w" default="1.0" />
+  <arg name="max_vx" default="0.5" />
+  <arg name="max_vy" default="0.2" />
+  <arg name="max_w" default="0.2" />
 
   <node pkg="path_follower" type="mpc_path_follower_node" name="mpc_path_follower" output="screen">
     <param name="path_topic" value="$(arg path_topic)" />
@@ -21,6 +25,10 @@
     <param name="dt" value="$(arg dt)" />
     <param name="horizon_steps" value="$(arg horizon_steps)" />
     <param name="lambda" value="$(arg lambda)" />
+    <param name="lambda_vx" value="$(arg lambda_vx)" />
+    <param name="lambda_vy" value="$(arg lambda_vy)" />
+    <param name="allow_reverse" value="$(arg allow_reverse)" />
+    <param name="nearest_search_window" value="$(arg nearest_search_window)" />
 
     <param name="max_vx" value="$(arg max_vx)" />
     <param name="max_vy" value="$(arg max_vy)" />
@@ -32,14 +40,22 @@
 
   <arg name="fixed_frame" default="world"/>
 
-  <param name="robot_description" textfile="$(find hybrid_a_star)/model/car_model/default.urdf"/>
-  <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher"/>
-  <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher"/>
+  <arg name="enable_car_model" default="true"/>
+  <arg name="car_model_ns" default="car_model"/>
+  <arg name="car_model_tf_prefix" default="car"/>
+
+  <group if="$(arg enable_car_model)" ns="$(arg car_model_ns)">
+    <param name="robot_description" textfile="$(find hybrid_a_star)/model/car_model/default.urdf"/>
+    <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher"/>
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher">
+      <param name="tf_prefix" value="$(arg car_model_tf_prefix)"/>
+    </node>
+  </group>
 
   <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d $(find hybrid_a_star)/rviz/display_hybrid_astar.rviz"/> -->
 
   <!--static_transform_publisher x y z yaw pitch roll frame_id child_frame_id period_in_ms-->
-  <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0 world map 100"/>
+  <!-- <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0 world map 100"/> -->
 
   <!-- <node pkg="map_server" type="map_server" name="map_server" args="$(find hybrid_a_star)/maps/map.yaml"/> -->
 
