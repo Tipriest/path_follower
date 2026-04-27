@@ -22,7 +22,7 @@
 ## 参数
 
 - `control_rate` (默认 10.0): 控制频率
-- `dt` (默认 0.1): 预测步长，建议设置为 $1/\text{control_rate}$
+- `dt` (默认 0.1): 预测步长，建议设置为 $1/\text{control\_rate}$
 - `horizon_steps` (默认 10): 预测步数
 - `lambda` (默认 0.1): 正则化系数
 - `max_vx` / `max_vy` / `max_w` : 速度限幅
@@ -30,7 +30,7 @@
 ## 调参建议
 
 - 先只调 `max_vx/max_vy/max_w`，确保速度不超过机器人能力和仿真稳定范围。
-- 设定 `control_rate` 后，用 $dt = 1/\text{control_rate}$ 保持预测步长一致。
+- 设定 `control_rate` 后，用 $dt = 1/\text{control\_rate}$ 保持预测步长一致。
 - `horizon_steps` 可从 8-15 开始：过小易抖动，过大会增大计算量和滞后。
 - 轨迹过密时，适当降低 `control_rate` 或在上游做稀疏化，避免近邻点抖动。
 - 跟踪发散时增大 `lambda` 稳定控制；跟踪滞后时减小 `lambda` 增强响应。
